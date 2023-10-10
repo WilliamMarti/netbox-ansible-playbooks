@@ -1,0 +1,169 @@
+- name: Update and upgrade apt packages
+  ansible.builtin.apt:
+    upgrade: yes
+    update_cache: yes
+    cache_valid_time: 86400
+
+- name: install system packages
+  ansible.builtin.apt:
+    pkg:
+      - redis-server
+      - pip
+      - python3
+      - python3-pip 
+      - python3-venv 
+      - python3-dev
+      - build-essential
+      - libxml2-dev
+      - libxslt1-dev
+      - libffi-dev
+      - libpq-dev
+      - libssl-dev
+      - zlib1g-dev
+      - nginx
+
+- name: Download and unpack Netbox file
+  ansible.builtin.unarchive:
+    src: "https://github.com/netbox-community/netbox/archive/refs/tags/v{{ netbox.version }}.tar.gz"
+    dest: /opt
+    remote_src: yes
+
+- name: Rename new Netbox dir
+  ansible.builtin.copy:
+    src: /opt/netbox-{{ netbox.version }}
+    dest: /opt/netbox
+    owner: root
+    group: root
+    remote_src: yes
+
+- name: Delete downloaded netbox dir
+  ansible.builtin.file:
+    path: /opt/netbox-{{ netbox.version }}
+    state: absent
+
+- name: Ensure group "netbox" exists
+  ansible.builtin.group:
+    name: netbox
+    state: present
+
+- name: Add the user netbox
+  ansible.builtin.user:
+    name: netbox
+    group: netbox
+
+- name: Recursively change ownership of media/reports/scripts directories
+  ansible.builtin.file:
+    path: /opt/netbox/netbox/{{ item }}/
+    state: directory
+    recurse: yes
+    owner: netbox
+    group: netbox
+  loop:
+    - media
+    - reports
+    - scripts
+
+- name: Run generate_secret_key.py
+  ansible.builtin.shell: 
+    cmd: python3 /opt/netbox/netbox/generate_secret_key.py
+  register: generate_secret
+
+- name: Template configuration.py file
+  ansible.builtin.template:
+    src: netbox_configuration.j2
+    dest: /opt/netbox/netbox/netbox/configuration.py
+    owner: root
+    group: root
+
+- name: Run upgrade.sh script
+  ansible.builtin.shell: 
+    cmd: /opt/netbox/upgrade.sh
+
+- name: Create check_superuser.py script
+  ansible.builtin.template:
+    src: check_superuser.j2
+    dest: ~/check_superuser.py
+    owner: root
+    group: root
+  register: is_superuser
+
+- name: Create superuser, skip this step if superuser has already been created.
+  ansible.builtin.expect:
+    command: /opt/netbox/venv/bin/python3 /opt/netbox/netbox/manage.py createsuperuser
+    responses:
+      'Username*': '{{ netbox.superuser_username }}'
+      'Email address:': '{{ netbox.superuser_email }}'
+      'Password:': '{{ root_password }}'
+      'Password \(again\):': '{{ superuser_password }}'
+  when: is_superuser == 1
+
+- name: Copy gunicorn_config.py file to new Netbox dir
+  ansible.builtin.copy:
+    src: /opt/netbox/contrib/gunicorn.py
+    dest: /opt/netbox/gunicorn.py
+    owner: root
+    group: root
+    remote_src: yes
+
+- name: Copy service files
+  ansible.builtin.copy:
+    src: /opt/netbox/contrib/{{ item }}.service
+    dest: /etc/systemd/system/{{ item }}.service
+    owner: root
+    group: root
+    remote_src: yes
+  loop:
+    - netbox
+    - netbox-rq
+
+- name: Start netbox and netbox-rq services
+  ansible.builtin.systemd:
+    state: started
+    enabled: yes
+    name: "{{ item }}"
+  loop:
+    - netbox
+    - netbox-rq
+
+- name: Create a crt/private ssl directories
+  ansible.builtin.file:
+    path: "/etc/ssl/{{ item }}"
+    state: directory
+  loop:
+    - certs
+    - private
+
+- name: Generate an OpenSSL private key
+  community.crypto.openssl_privatekey:
+    path: /etc/ssl/private/netbox.key
+  no_log: true
+
+- name: Generate a Self Signed OpenSSL certificate
+  community.crypto.x509_certificate:
+    path: /etc/ssl/certs/netbox.crt
+    privatekey_path: /etc/ssl/private/netbox.key
+    provider: selfsigned
+
+- name: Copy nginx.conf file to new sites-available
+  ansible.builtin.copy:
+    src: /opt/netbox/contrib/nginx.conf
+    dest: /etc/nginx/sites-available/netbox
+    owner: root
+    group: root
+    remote_src: yes
+
+- name: Delete default nginx file
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: Create a symbolic link to netbox nginx config file
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/netbox
+    dest: /etc/nginx/sites-enabled/netbox
+    state: link
+
+- name: Restart nginx 
+  ansible.builtin.service:
+    name: nginx
+    state: restarted

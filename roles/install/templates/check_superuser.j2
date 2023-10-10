@@ -1,0 +1,2 @@
+from django.contrib.auth.models import User
+print(len(User.objects.filter(username='{{ netbox.superuser_username }}')))

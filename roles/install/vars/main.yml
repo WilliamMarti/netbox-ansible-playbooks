@@ -1,0 +1,7 @@
+netbox:
+    version: 3.5.9
+    superuser_email: test@gmail.com
+    superuser_username: admin
+database:
+    username: netbox
+    hostname: localhost
