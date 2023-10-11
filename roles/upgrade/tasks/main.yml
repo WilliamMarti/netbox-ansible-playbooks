@@ -1,112 +1,82 @@
----
-- hosts: all
-  become: yes
-  become_user: root
-  vars:
-    created_username: kareas
+- name: Update and upgrade apt packages
+  ansible.builtin.apt:
+    upgrade: yes
+    update_cache: yes
+    cache_valid_time: 86400
 
-  tasks:
+- name: Download and unpack Netbox file
+  ansible.builtin.unarchive:
+    src: "https://github.com/netbox-community/netbox/archive/refs/tags/v{{ netbox.new_version }}.tar.gz"
+    dest: /opt
+    remote_src: yes
 
-    - name: Update and upgrade apt packages
-      ansible.builtin.apt:
-        upgrade: yes
-        update_cache: yes
-        cache_valid_time: 86400
+- name: Copy configuration.py / ldap_config.py / gunicorn_config.py files
+  ansible.builtin.copy:
+    src: "/opt/netbox/{{ item }}"
+    dest: /opt
+    owner: root
+    group: root
+    remote_src: yes
+  loop:
+    - /netbox/netbox/configuration.py
+    - /netbox/netbox/ldap_config.py
+    - gunicorn.py
+  ignore_errors: true
 
-    - name: Download and unpack Netbox file
-      ansible.builtin.unarchive:
-        src: "https://github.com/netbox-community/netbox/archive/refs/tags/v{{ netbox.new_version }}.tar.gz"
-        dest: /opt
-        remote_src: yes
+- name: Copy reports directory
+  ansible.builtin.copy:
+    src: /opt/netbox/netbox/reports/
+    dest: /opt
+    owner: root
+    group: root
+    remote_src: yes
+  ignore_errors: true
 
-    - name: Copy configuration.py file
-      ansible.builtin.copy:
-        src: /opt/netbox/netbox/netbox/configuration.py
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
+- name: Delete init file
+  ansible.builtin.file:
+    path: /opt/__init__.py
+    state: absent    
 
-    - name: Copy ldap_config.py file
-      ansible.builtin.copy:
-        src: /opt/netbox/netbox/netbox/ldap_config.py
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
+- name: Delete old /opt/netbox dir
+  ansible.builtin.file:
+    path: /opt/netbox/
+    state: absent
 
-    - name: Copy gunicorn_config.py file
-      ansible.builtin.copy:
-        src: /opt/netbox/gunicorn_config.py
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
+- name: Rename new Netbox dir
+  command: "mv /opt/netbox-{{ netbox.new_version }} /opt/netbox"
 
-    - name: Copy reports directory
-      ansible.builtin.copy:
-        src: /opt/netbox/netbox/reports/
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
-    
-    - name: Delete init file
-      ansible.builtin.file:
-        path: /opt/__init__.py
-        state: absent    
+- name: Move configuration.py / ldap_config.py to new Netbox dir
+  ansible.builtin.copy:
+    src: "/opt/{{ item }}"
+    dest: /opt/netbox/netbox/netbox/
+    owner: root
+    group: root
+    remote_src: yes
+  loop:
+    - configuration.py
+    - ldap_config.py
 
-    - name: Delete old /opt/netbox dir
-      ansible.builtin.file:
-        path: /opt/netbox
-        state: absent
+- name: Move gunicorn_config.py to new Netbox dir
+  ansible.builtin.copy:
+    src: /opt/gunicorn.py
+    dest: /opt/netbox/gunicorn.py
+    owner: root
+    group: root
+    remote_src: yes
 
-    - name: Rename new Netbox dir
-      ansible.builtin.copy:
-        src: "/opt/netbox-{{ netbox.new_version }}"
-        dest: /opt/netbox
-        owner: root
-        group: root
-        remote_src: yes
+- name: "Delete old /opt/netbox-{{ netbox.new_version }} dir"
+  ansible.builtin.file:
+    path: "/opt/netbox-{{ netbox.new_version }}"
+    state: absent
 
-    - name: "Delete old /opt/netbox-{{ netbox.new_version }} dir"
-      ansible.builtin.file:
-        path: "/opt/netbox-{{ netbox.new_version }}"
-        state: absent
+- name: Run upgrade.sh script
+  ansible.builtin.shell: 
+    cmd: /opt/netbox/upgrade.sh
 
-    - name: Move configuration.py file to new Netbox dir
-      ansible.builtin.copy:
-        src: /opt/netbox/netbox/netbox/configuration.py
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
-
-    - name: Move ldap_config.py file to new Netbox dir
-      ansible.builtin.copy:
-        src: /opt/netbox/netbox/netbox/ldap_config.py
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
-
-    - name: Copy gunicorn_config.py file to new Netbox dir
-      ansible.builtin.copy:
-        src: /opt/netbox/gunicorn_config.py
-        dest: /opt
-        owner: root
-        group: root
-        remote_src: yes
-
-    - name: "Delete old /opt/netbox-{{ netbox.new_version }} dir"
-      ansible.builtin.file:
-        path: "/opt/netbox-{{ netbox.new_version }}"
-        state: absent
-
-    - name: Start netbox and netbox-rq services
-      ansible.builtin.systemd:
-        state: restarted
-        name: "{{ item }}"
-      loop:
-        - netbox
-        - netbox-rq
+- name: Start netbox and netbox-rq services
+  ansible.builtin.systemd:
+    state: restarted
+    name: "{{ item }}"
+  loop:
+    - netbox
+    - netbox-rq

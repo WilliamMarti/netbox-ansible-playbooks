@@ -2,7 +2,7 @@
 
 Playbooks for setting up or updating a Netbox install
 
-### install Role
+### Netbox Install Role
 
 Assumptions:
 
@@ -26,7 +26,8 @@ Extra Variables
 ansible-playbook netbox_install.yml -u $server_root_username -kK -i $server_hostname, -e netbox_db_password=$netbox_db_password -e superuser_password=$superuser_password
 ```
 
-### upgrade Role
+### Netbox Upgrade Role
 
-
-
+```
+ansible-playbook netbox_upgrade.yml -u $server_root_username -kK -i $server_hostname,
+```
